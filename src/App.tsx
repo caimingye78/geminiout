@@ -19,6 +19,7 @@ import {
 import {
   Archive,
   CheckCircle2,
+  CloudDownload,
   Download,
   FileDown,
   FileText,
@@ -54,6 +55,13 @@ type Conversation = {
 
 type ExportStyle = 'editorial' | 'compact' | 'academic';
 
+type LinkFetchState = {
+  status: 'loading' | 'success' | 'failed';
+  title?: string;
+  chars?: number;
+  error?: string;
+};
+
 const roleLabels: Record<Role, string> = {
   user: '你',
   assistant: 'Gemini',
@@ -67,6 +75,8 @@ const md = new MarkdownIt({
   breaks: true,
   typographer: true,
 });
+
+const READER_PROXY_PREFIX = 'https://r.jina.ai/http://r.jina.ai/http://';
 
 const sampleText = `# 一个含公式的 Gemini 对话示例
 
@@ -90,6 +100,8 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detectedLinks, setDetectedLinks] = useState<string[]>([]);
+  const [linkFetches, setLinkFetches] = useState<Record<string, LinkFetchState>>({});
+  const [isFetchingLinks, setIsFetchingLinks] = useState(false);
   const [pastedLinkText, setPastedLinkText] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -160,6 +172,49 @@ function App() {
     const links = extractGeminiLinks(pastedLinkText);
     addDetectedLinks(links);
     setStatus(links.length ? `从粘贴文本提取出 ${links.length} 个 Gemini 链接` : '粘贴内容里没有找到 Gemini 分享链接');
+  }
+
+  async function fetchDetectedLinkContent() {
+    if (!detectedLinks.length || isFetchingLinks) return;
+    setIsFetchingLinks(true);
+    const fetched: Conversation[] = [];
+    let failed = 0;
+
+    for (const [index, link] of detectedLinks.entries()) {
+      setStatus(`正在拉取公开链接 ${index + 1}/${detectedLinks.length}...`);
+      setLinkFetches((current) => ({ ...current, [link]: { status: 'loading' } }));
+      try {
+        const response = await fetch(`${READER_PROXY_PREFIX}${link}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        const parsed = parseReaderMarkdown(link, text);
+        if (parsed.body.length < 20) throw new Error('没有读到正文，可能需要登录或分享已失效');
+        const conversation = conversationFromReader(link, parsed, index);
+        fetched.push(conversation);
+        setLinkFetches((current) => ({
+          ...current,
+          [link]: { status: 'success', title: conversation.title, chars: parsed.body.length },
+        }));
+      } catch (error) {
+        failed += 1;
+        setLinkFetches((current) => ({
+          ...current,
+          [link]: {
+            status: 'failed',
+            error: error instanceof Error ? error.message : '未知错误',
+          },
+        }));
+      }
+    }
+
+    if (fetched.length) {
+      const merged = dedupeConversations([...conversations, ...fetched]);
+      setConversations(merged);
+      setSelectedIds(new Set(merged.map((item) => item.id)));
+      setActiveId(fetched[0].id);
+    }
+    setStatus(`公开链接拉取完成：成功 ${fetched.length} 个，失败 ${failed} 个`);
+    setIsFetchingLinks(false);
   }
 
   function loadSample() {
@@ -281,11 +336,33 @@ function App() {
               <Link2 size={17} />
               <span>截图链接</span>
             </div>
-            {detectedLinks.map((link) => (
-              <a key={link} href={link} target="_blank" rel="noreferrer">
-                {link}
-              </a>
-            ))}
+            <button
+              className="fetch-links-button"
+              type="button"
+              disabled={isFetchingLinks}
+              onClick={() => void fetchDetectedLinkContent()}
+            >
+              <CloudDownload size={16} />
+              {isFetchingLinks ? '正在拉取公开内容...' : '拉取公开内容'}
+            </button>
+            <p className="link-hint">会自动把可访问的 Gemini 分享页转成会话，失败项会保留状态。</p>
+            {detectedLinks.map((link) => {
+              const fetchState = linkFetches[link];
+              return (
+                <div key={link} className={`link-result-row ${fetchState?.status ?? ''}`}>
+                  <a href={link} target="_blank" rel="noreferrer">
+                    {link}
+                  </a>
+                  {fetchState && (
+                    <small>
+                      {fetchState.status === 'loading' && '拉取中'}
+                      {fetchState.status === 'success' && `已加入：${fetchState.title} · ${fetchState.chars ?? 0} 字符`}
+                      {fetchState.status === 'failed' && `失败：${fetchState.error}`}
+                    </small>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -464,6 +541,45 @@ function parseFile(fileName: string, text: string): Conversation[] {
     return [plainTextConversation(fileName, body)];
   }
   return [plainTextConversation(fileName, text)];
+}
+
+function parseReaderMarkdown(url: string, text: string) {
+  const titleMatch = text.match(/^Title:\s*(.+)$/m);
+  const marker = 'Markdown Content:';
+  const bodyStart = text.indexOf(marker);
+  const rawBody = bodyStart >= 0 ? text.slice(bodyStart + marker.length) : text;
+  const body = rawBody
+    .replace(/^Title:\s*.+$/gm, '')
+    .replace(/^URL Source:\s*.+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return {
+    title: cleanReaderTitle(titleMatch?.[1] ?? inferTitle(body || url)),
+    body,
+  };
+}
+
+function cleanReaderTitle(title: string) {
+  return title
+    .replace(/^‎?Gemini\s*-\s*/i, '')
+    .replace(/^direct access to Google AI$/i, '')
+    .trim();
+}
+
+function conversationFromReader(url: string, parsed: { title: string; body: string }, index: number): Conversation {
+  const title = parsed.title || `Gemini 分享 ${index + 1}`;
+  return {
+    id: makeId(url, parsed.body.slice(0, 120)),
+    title,
+    sourceName: url,
+    messages: [
+      {
+        id: makeId(url, 'reader-message'),
+        role: 'assistant',
+        text: parsed.body,
+      },
+    ],
+  };
 }
 
 function extractGeminiLinks(text: string) {

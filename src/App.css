@@ -230,8 +230,40 @@ button {
   cursor: pointer;
 }
 
+.fetch-links-button {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(216, 238, 232, 0.38);
+  border-radius: 8px;
+  background: #d8eee8;
+  color: #102726;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.fetch-links-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.link-hint {
+  margin: 8px 0 2px;
+  color: #c9deda;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .link-results .section-title {
   margin-bottom: 10px;
+}
+
+.link-result-row {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .link-results a {
@@ -241,12 +273,26 @@ button {
   line-height: 1.45;
   overflow-wrap: anywhere;
   text-decoration: none;
-  padding: 8px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .link-results a:hover {
   color: #ffffff;
+}
+
+.link-result-row small {
+  display: block;
+  margin-top: 4px;
+  color: #c9deda;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.link-result-row.success small {
+  color: #d8eee8;
+}
+
+.link-result-row.failed small {
+  color: #ffcfca;
 }
 
 .conversation-list {

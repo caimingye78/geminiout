@@ -4,3 +4,7 @@ dist
 .env
 .env.local
 npm-debug.log*
+scraped-gemini
+gemini-share-export-deliverable.zip
+scripts/scrape-gemini-shares.mjs
+scripts/build-scraped-docx.mjs
