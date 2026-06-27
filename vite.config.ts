@@ -9,6 +9,23 @@ const chromePath = [
 ].find((candidate) => fs.existsSync(candidate));
 
 const localReadCache = new Map<string, { title: string; body: string; url: string }>();
+const runtimeImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<{
+  chromium: {
+    launch(options: { executablePath: string; headless: boolean }): Promise<{
+      newPage(options: { viewport: { width: number; height: number } }): Promise<{
+        goto(url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }): Promise<unknown>;
+        waitForTimeout(timeout: number): Promise<void>;
+        locator(selector: string): {
+          first(): {
+            innerText(options: { timeout: number }): Promise<string>;
+          };
+          innerText(options: { timeout: number }): Promise<string>;
+        };
+      }>;
+      close(): Promise<void>;
+    }>;
+  };
+}>;
 
 function cleanGeminiText(text: string) {
   const drop = new Set([
@@ -38,7 +55,7 @@ async function readGeminiShare(url: string) {
     throw new Error('只支持 gemini.google.com/share 公开链接');
   }
 
-  const { chromium } = await import('playwright-core');
+  const { chromium } = await runtimeImport('playwright-core');
   const browser = await chromium.launch({ executablePath: chromePath, headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
