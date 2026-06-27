@@ -77,6 +77,7 @@ const md = new MarkdownIt({
 });
 
 const READER_PROXY_PREFIX = 'https://r.jina.ai/http://r.jina.ai/http://';
+const LOCAL_READER_PATH = `${import.meta.env.BASE_URL}api/read-gemini`;
 
 const sampleText = `# 一个含公式的 Gemini 对话示例
 
@@ -184,10 +185,7 @@ function App() {
       setStatus(`正在拉取公开链接 ${index + 1}/${detectedLinks.length}...`);
       setLinkFetches((current) => ({ ...current, [link]: { status: 'loading' } }));
       try {
-        const response = await fetch(`${READER_PROXY_PREFIX}${link}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const text = await response.text();
-        const parsed = parseReaderMarkdown(link, text);
+        const parsed = await readSharedGeminiLink(link);
         if (parsed.body.length < 20) throw new Error('没有读到正文，可能需要登录或分享已失效');
         const conversation = conversationFromReader(link, parsed, index);
         fetched.push(conversation);
@@ -526,6 +524,41 @@ function renderMarkdownWithMath(text: string) {
     html = html.replace(`@@MATH_${index}@@`, mathHtml);
   });
   return html;
+}
+
+async function readSharedGeminiLink(link: string) {
+  const errors: string[] = [];
+  try {
+    const localResponse = await fetch(`${LOCAL_READER_PATH}?url=${encodeURIComponent(link)}`);
+    if (localResponse.ok) {
+      const data = (await localResponse.json()) as { title?: string; body?: string; error?: string };
+      if (data.body) {
+        return {
+          title: cleanReaderTitle(data.title ?? inferTitle(data.body)),
+          body: data.body,
+        };
+      }
+      if (data.error) errors.push(`本地读取失败：${data.error}`);
+    } else {
+      const data = (await localResponse.json().catch(() => null)) as { error?: string } | null;
+      errors.push(`本地读取失败：${data?.error ?? `HTTP ${localResponse.status}`}`);
+    }
+  } catch (error) {
+    errors.push(`本地读取不可用：${error instanceof Error ? error.message : '未知错误'}`);
+  }
+
+  try {
+    const response = await fetch(`${READER_PROXY_PREFIX}${link}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    const parsed = parseReaderMarkdown(link, text);
+    if (parsed.body.includes('"AuthenticationRequiredError"')) throw new Error('公开 reader 要求认证');
+    return parsed;
+  } catch (error) {
+    errors.push(`公开 reader 失败：${error instanceof Error ? error.message : '未知错误'}`);
+  }
+
+  throw new Error(errors.join('；'));
 }
 
 function parseFile(fileName: string, text: string): Conversation[] {
