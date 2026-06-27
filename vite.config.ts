@@ -51,8 +51,8 @@ function cleanGeminiText(text: string) {
 async function readGeminiShare(url: string) {
   if (localReadCache.has(url)) return localReadCache.get(url);
   if (!chromePath) throw new Error('没有找到 Chrome / Chromium / Edge，无法本地读取 Gemini 分享页');
-  if (!/^https:\/\/gemini\.google\.com\/share\/[A-Za-z0-9_-]+$/.test(url)) {
-    throw new Error('只支持 gemini.google.com/share 公开链接');
+  if (!/^https:\/\/(?:gemini\.google\.com\/share|share\.gemini\.google)\/[A-Za-z0-9_-]+(?:\?.*)?$/.test(url)) {
+    throw new Error('只支持 Gemini 公开分享链接');
   }
 
   const { chromium } = await runtimeImport('playwright-core');
@@ -60,9 +60,14 @@ async function readGeminiShare(url: string) {
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.waitForTimeout(7000);
+    let rawText = '';
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await page.waitForTimeout(attempt === 0 ? 5000 : 2500);
+      const nextText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '');
+      if (nextText.length > rawText.length) rawText = nextText;
+      if (cleanGeminiText(rawText).length > 1000) break;
+    }
     const title = (await page.locator('h1').first().innerText({ timeout: 5000 }).catch(() => '')).trim();
-    const rawText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '');
     const body = cleanGeminiText(rawText)
       .split('\n')
       .filter((line) => line !== url)

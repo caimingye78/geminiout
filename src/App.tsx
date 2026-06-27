@@ -616,24 +616,31 @@ function conversationFromReader(url: string, parsed: { title: string; body: stri
 }
 
 function extractGeminiLinks(text: string) {
-  const normalizedLines = text
+  const normalizedText = text
     .replace(/[“”]/g, '"')
     .replace(/[，。]/g, '.')
-    .replace(/[：]/g, ':')
+    .replace(/[：]/g, ':');
+  const normalizedLines = normalizedText
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
   const lineMatches = normalizedLines.flatMap((line) => {
     const normalized = line
-      .replace(/gemini\.google\.com\/share\//gi, 'https://gemini.google.com/share/')
-      .replace(/g\.co\/gemini\/share\//gi, 'https://g.co/gemini/share/');
-    return normalized.match(/https?:\/\/(?:gemini\.google\.com\/share|g\.co\/gemini\/share)\/[A-Za-z0-9_-]+/g) ?? [];
+      .replace(/\s*\/\s*/g, '/')
+      .replace(/\s*\.\s*/g, '.')
+      .replace(/(?:https?:\/\/)?gemini\.google\.com\/share\//gi, 'https://gemini.google.com/share/')
+      .replace(/(?:https?:\/\/)?share\.gemini\.google\//gi, 'https://share.gemini.google/')
+      .replace(/(?:https?:\/\/)?g\.co\/gemini\/share\//gi, 'https://g.co/gemini/share/');
+    return normalized.match(/https?:\/\/(?:gemini\.google\.com\/share|share\.gemini\.google|g\.co\/gemini\/share)\/[A-Za-z0-9_-]+/g) ?? [];
   });
-  const compact = normalizedLines
-    .join('')
+  const compact = normalizedText
+    .replace(/\s+/g, '')
+    .replace(/https?:\/\//gi, '')
     .replace(/gemini\.google\.com\/share\//gi, 'https://gemini.google.com/share/')
+    .replace(/share\.gemini\.google\//gi, 'https://share.gemini.google/')
     .replace(/g\.co\/gemini\/share\//gi, 'https://g.co/gemini/share/');
-  const compactMatches = compact.match(/https?:\/\/(?:gemini\.google\.com\/share|g\.co\/gemini\/share)\/[A-Za-z0-9_-]{12}/g) ?? [];
+  const compactMatches =
+    compact.match(/https?:\/\/(?:gemini\.google\.com\/share|share\.gemini\.google|g\.co\/gemini\/share)\/[A-Za-z0-9_-]{12}/g) ?? [];
   return Array.from(new Set([...lineMatches, ...compactMatches].map((link) => link.replace(/[.,;:，。；：]+$/, ''))));
 }
 
